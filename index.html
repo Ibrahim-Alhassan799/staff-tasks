@@ -1,0 +1,961 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>سجل مهام الموظفين</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alexandria:wght@500;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap">
+<style>
+:root{color-scheme:light}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+/* Layout: one centered column, read right to left. A quiet summary line, a manager filter,
+   then one block per employee with a load bar scaled to the busiest person. Task rows sit
+   on a five-track grid that stacks on phones. */
+:root{
+  --bg:#F2F4F6; --surface:#FFFFFF; --sunken:#E8ECF0; --ink:#17212B; --muted:#586776; --line:#D7DEE5;
+  --accent:#0C6A6B; --accent-ink:#FFFFFF; --accent-soft:#DAECEC;
+  --todo-bg:#E6EAEE; --todo-fg:#3C4A57;
+  --doing-bg:#FBEECD; --doing-fg:#774800;
+  --done-bg:#DCEFE3; --done-fg:#17613A;
+  --late-bg:#FAE0DD; --late-fg:#A1241B;
+  --scrim:rgb(12 18 24 / .55);
+  --font-display:'Alexandria','IBM Plex Sans Arabic','Segoe UI',Tahoma,sans-serif;
+  --font-body:'IBM Plex Sans Arabic','Segoe UI',Tahoma,'Noto Sans Arabic',sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0F151B; --surface:#17202A; --sunken:#202C38; --ink:#E7EDF2; --muted:#9BA9B6; --line:#2C3947;
+    --accent:#56C5C0; --accent-ink:#06211F; --accent-soft:#173836;
+    --todo-bg:#28343F; --todo-fg:#C5D0DB;
+    --doing-bg:#3D2F0E; --doing-fg:#F2C86B;
+    --done-bg:#153524; --done-fg:#80D4A3;
+    --late-bg:#44201D; --late-fg:#F5A59D;
+    --scrim:rgb(0 0 0 / .65);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0F151B; --surface:#17202A; --sunken:#202C38; --ink:#E7EDF2; --muted:#9BA9B6; --line:#2C3947;
+  --accent:#56C5C0; --accent-ink:#06211F; --accent-soft:#173836;
+  --todo-bg:#28343F; --todo-fg:#C5D0DB;
+  --doing-bg:#3D2F0E; --doing-fg:#F2C86B;
+  --done-bg:#153524; --done-fg:#80D4A3;
+  --late-bg:#44201D; --late-fg:#F5A59D;
+  --scrim:rgb(0 0 0 / .65);
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:16px;line-height:1.6}
+.app{--act:12rem;max-inline-size:62rem;margin-inline:auto;padding-inline:16px;padding-block:1.75rem 3rem;display:flex;flex-direction:column;gap:1.5rem}
+h1,h2,h3,p,ul,dl,dd{margin:0}
+h1,h2,h3{font-family:var(--font-display);text-wrap:balance;line-height:1.35}
+h1{font-size:1.75rem;font-weight:700}
+.num{font-variant-numeric:tabular-nums}
+
+/* header */
+.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:1rem}
+.top-text{min-inline-size:0;display:flex;flex-direction:column;gap:.15rem}
+.today{color:var(--muted);font-size:.875rem}
+.top-actions{display:flex;flex-wrap:wrap;gap:.5rem}
+
+/* controls */
+.btn{font:inherit;font-weight:500;font-size:.9375rem;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:.5rem .95rem;cursor:pointer;line-height:1.4}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.sm{font-size:.8125rem;padding:.3rem .7rem}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--late-fg);border-color:transparent;background:transparent}
+.btn.danger.armed{background:var(--late-bg);border-color:var(--late-fg)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ro .w-only{display:none !important}
+
+/* summary */
+.sum{display:flex;flex-wrap:wrap;gap:.9rem 2.5rem;padding-block:.25rem}
+.sum div{display:flex;flex-direction:column-reverse}
+.sum dt{color:var(--muted);font-size:.8125rem}
+.sum dd{font-family:var(--font-display);font-weight:700;font-size:1.5rem;line-height:1.3;font-variant-numeric:tabular-nums}
+.sum .warn dd{color:var(--late-fg)}
+@media (max-width:30rem){.sum{display:grid;grid-template-columns:1fr 1fr;gap:.9rem 1.25rem}}
+
+/* filters */
+.filters{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.75rem 1.5rem}
+.chips{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;min-inline-size:0}
+.chips-label{color:var(--muted);font-size:.875rem;margin-inline-end:.25rem}
+.chip{font:inherit;font-size:.875rem;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:999px;padding:.25rem .85rem;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}
+.toggle{display:inline-flex;align-items:center;gap:.45rem;font-size:.875rem;color:var(--muted);cursor:pointer}
+.toggle input{inline-size:1rem;block-size:1rem;accent-color:var(--accent)}
+
+/* employees */
+.board{display:flex;flex-direction:column;gap:1rem}
+.emp{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.emp-head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:.6rem 1rem;padding:1rem 1.1rem .95rem}
+.emp-id{min-inline-size:0;display:flex;flex-direction:column;gap:.1rem}
+.emp h2{font-size:1.125rem;font-weight:700;overflow-wrap:anywhere}
+.emp-stat{color:var(--muted);font-size:.875rem;font-variant-numeric:tabular-nums}
+.emp-stat b{color:var(--ink);font-weight:600}
+.emp-note{color:var(--muted);font-size:.8125rem}
+.meter{grid-column:1 / -1;block-size:6px;border-radius:3px;background:var(--sunken)}
+.meter span{display:block;block-size:100%;border-radius:3px;background:var(--accent)}
+.free{color:var(--done-fg);font-weight:600}
+
+.tasks{list-style:none;padding:0}
+.task{border-block-start:1px solid var(--line);padding:.8rem 1.1rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .9rem}
+.t-main{flex:1 1 100%;min-inline-size:0;display:flex;flex-direction:column;gap:.1rem}
+.t-title{font-weight:500;overflow-wrap:anywhere}
+.t-meta{color:var(--muted);font-size:.8125rem;overflow-wrap:anywhere}
+.t-notes{color:var(--muted);font-size:.8125rem;overflow-wrap:anywhere;white-space:pre-wrap}
+.t-dur{font-weight:600;font-size:.875rem;font-variant-numeric:tabular-nums}
+.t-due{font-size:.875rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.t-due.soon{color:var(--ink);font-weight:600}
+.tag{display:inline-block;font-size:.75rem;font-weight:600;border-radius:999px;padding:.05rem .6rem;white-space:nowrap}
+.tag.late{background:var(--late-bg);color:var(--late-fg)}
+.t-title .tag{margin-inline-start:.5rem;vertical-align:.1em}
+.t-act{margin-inline-start:auto;display:flex;align-items:center;gap:.5rem}
+.is-done .t-title,.is-done .t-dur{color:var(--muted)}
+.none{color:var(--muted);font-size:.875rem;padding:.8rem 1.1rem;border-block-start:1px solid var(--line)}
+
+.st{position:relative;display:inline-block;border-radius:999px;background:var(--todo-bg);color:var(--todo-fg)}
+.st[data-status="doing"]{background:var(--doing-bg);color:var(--doing-fg)}
+.st[data-status="done"]{background:var(--done-bg);color:var(--done-fg)}
+.st select{appearance:none;-webkit-appearance:none;font:inherit;font-size:.8125rem;font-weight:600;color:inherit;background:transparent;border:1px solid transparent;border-radius:999px;padding:.3rem .85rem;padding-inline-end:1.7rem;cursor:pointer;max-inline-size:100%}
+.st select option{color:var(--ink);background:var(--surface)}
+.st.sel::after{content:"";position:absolute;inset-inline-end:.75rem;inset-block-start:calc(50% - .3rem);inline-size:.38rem;block-size:.38rem;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg);pointer-events:none}
+.st.pill{font-size:.8125rem;font-weight:600;padding:.3rem .85rem}
+
+@media (min-width:46rem){
+  .task{display:grid;grid-template-columns:minmax(0,1fr) 6.5rem 11rem var(--act);gap:.9rem}
+  .t-main{flex:none}
+  .t-act{margin-inline-start:0;justify-content:flex-end}
+  .app.ro{--act:7rem}
+}
+
+/* states */
+.state{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:1.75rem 1.25rem;display:flex;flex-direction:column;gap:.75rem;align-items:flex-start}
+.state h2{font-size:1.125rem}
+.state p{color:var(--muted);max-inline-size:60ch}
+.state ol{margin:0;padding-inline-start:1.25rem;color:var(--muted);max-inline-size:60ch;display:flex;flex-direction:column;gap:.25rem}
+.state .top-actions{margin-block-start:.25rem}
+.foot{color:var(--muted);font-size:.8125rem;max-inline-size:65ch}
+.gate-form{display:flex;flex-wrap:wrap;gap:.4rem;inline-size:min(24rem,100%)}
+.gate-form input{flex:1 1 12rem;letter-spacing:.06em}
+.ro-note{color:var(--muted);font-size:.875rem;background:var(--sunken);border-radius:8px;padding:.5rem .8rem}
+
+/* dialogs */
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);padding:1.25rem;inline-size:min(36rem,calc(100% - 2rem));max-block-size:calc(100% - 2rem);overflow:auto}
+dialog::backdrop{background:var(--scrim)}
+dialog h2{font-size:1.25rem;margin-block-end:1rem}
+dialog h3{font-size:.9375rem;margin-block:1.1rem .4rem;color:var(--muted);font-family:var(--font-body);font-weight:600}
+.form{display:flex;flex-direction:column;gap:.85rem}
+.field{display:flex;flex-direction:column;gap:.3rem;min-inline-size:0}
+.row2{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.85rem}
+label{font-size:.875rem;font-weight:500}
+.opt{color:var(--muted);font-weight:400;font-size:.8125rem}
+input[type="text"],input[type="number"],input[type="date"],select.inp,textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:.5rem .65rem;inline-size:100%;min-inline-size:0}
+textarea{resize:vertical;min-block-size:3.5rem}
+.join{display:grid;grid-template-columns:minmax(0,1fr) 6.5rem;gap:.4rem}
+.check{display:flex;align-items:center;gap:.5rem;align-self:end;padding-block-end:.5rem}
+.check input{inline-size:1.1rem;block-size:1.1rem;accent-color:var(--accent)}
+.hint{color:var(--muted);font-size:.8125rem;min-block-size:1.3em}
+.err{color:var(--late-fg);background:var(--late-bg);border-radius:8px;padding:.5rem .75rem;font-size:.875rem}
+.actions{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-block-start:.35rem}
+.actions .danger{margin-inline-start:auto}
+.addp{display:grid;grid-template-columns:minmax(0,1fr) 6.5rem auto;gap:.4rem}
+.plist{list-style:none;padding:0;display:flex;flex-direction:column;gap:.4rem}
+.plist li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:.5rem}
+.plist .cnt{color:var(--muted);font-size:.8125rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pnone{color:var(--muted);font-size:.875rem}
+@media (max-width:26rem){.addp{grid-template-columns:minmax(0,1fr) 6rem}.addp .btn{grid-column:1 / -1}}
+
+.toast{position:fixed;inset-block-end:calc(1rem + env(safe-area-inset-bottom,0px));inset-inline:16px;margin-inline:auto;inline-size:fit-content;max-inline-size:calc(100% - 32px);background:var(--ink);color:var(--bg);border-radius:10px;padding:.6rem 1rem;font-size:.9375rem;z-index:10}
+@media (prefers-reduced-motion:no-preference){.btn,.chip{transition:border-color .15s,background-color .15s}}
+</style>
+</head>
+<body>
+
+<div class="app" id="app" dir="rtl" lang="ar">
+  <header class="top">
+    <div class="top-text">
+      <h1>سجل مهام الموظفين</h1>
+      <p class="today" id="today"></p>
+    </div>
+    <div class="top-actions w-only" id="top-actions" hidden>
+      <button class="btn ghost" type="button" id="btn-share" hidden>نسخ رابط المشاركة</button>
+      <button class="btn" type="button" id="btn-people">الموظفون والمدراء</button>
+      <button class="btn primary" type="button" id="btn-new">مهمة جديدة</button>
+    </div>
+  </header>
+
+  <p class="ro-note" id="demo-note" hidden>وضع تجريبي: المهام محفوظة على هذا الجهاز فقط ولا يراها غيرك. المشاركة بين الجميع تبدأ بعد ربط مخزن البيانات.</p>
+
+  <section class="state" id="gate" hidden>
+    <h2>أدخل رمز الدخول</h2>
+    <p>الرمز عند مسؤول السجل. يُحفظ على جهازك، فلا تحتاج إدخاله مرة ثانية.</p>
+    <form class="gate-form" id="form-gate" novalidate>
+      <input type="text" id="g-code" dir="ltr" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="64" aria-label="رمز الدخول">
+      <button class="btn primary" type="submit" id="g-go">دخول</button>
+    </form>
+    <p class="err" id="g-err" role="alert" hidden></p>
+  </section>
+
+  <section class="state" id="loading">
+    <h2>جارٍ تحميل المهام…</h2>
+    <p>ستظهر هنا مهام كل موظف، والمدير الذي طلبها، والمدة المتوقعة لإنجازها.</p>
+  </section>
+
+  <section class="state" id="unavail" hidden>
+    <h2>تعذّر فتح السجل</h2>
+    <p id="unavail-text">تحقق من اتصال الإنترنت ثم أعد تحميل الصفحة.</p>
+  </section>
+
+  <section class="state" id="empty" hidden>
+    <h2>السجل فارغ</h2>
+    <p>كل مهمة تُعطى شفهياً أو بالواتساب تُسجَّل هنا مرة واحدة، فيرى المدراء ما عند كل موظف قبل أن يكلّفوه بجديد.</p>
+    <ol>
+      <li>أضف أسماء الموظفين والمدراء.</li>
+      <li>سجّل كل مهمة مع الموظف، والمدير الذي طلبها، والمدة المتوقعة.</li>
+      <li>يغيّر الموظف أو المدير حالة المهمة عند البدء وعند الإنجاز.</li>
+    </ol>
+    <div class="top-actions w-only">
+      <button class="btn primary" type="button" id="btn-people-2">إضافة الموظفين والمدراء</button>
+      <button class="btn" type="button" id="btn-new-2">تسجيل أول مهمة</button>
+    </div>
+  </section>
+
+  <div id="work" hidden style="display:contents">
+    <dl class="sum" id="sum"></dl>
+    <div class="filters">
+      <div class="chips" id="chips" role="group" aria-label="تصفية حسب المدير"></div>
+      <label class="toggle" for="show-done"><input type="checkbox" id="show-done"> إظهار المهام المنجزة</label>
+    </div>
+    <div class="board" id="board"></div>
+    <p class="foot">حجم العمل وموعد التفرّغ تقديريان: يوم العمل 8 ساعات، وأيام العمل من الأحد إلى الخميس، والمهام تُنجز واحدة تلو الأخرى.</p>
+  </div>
+
+  <dialog id="dlg-task" aria-labelledby="dt-h">
+    <form class="form" id="form-task" novalidate>
+      <h2 id="dt-h">مهمة جديدة</h2>
+      <div class="field">
+        <label for="f-title">المهمة</label>
+        <input type="text" id="f-title" maxlength="200" autocomplete="off" placeholder="مثال: تجهيز عرض سعر للعميل">
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="f-emp">الموظف</label>
+          <input type="text" id="f-emp" list="dl-emp" maxlength="60" autocomplete="off">
+          <p class="hint" id="h-emp"></p>
+        </div>
+        <div class="field">
+          <label for="f-mgr">المدير الذي طلبها</label>
+          <input type="text" id="f-mgr" list="dl-mgr" maxlength="60" autocomplete="off">
+          <p class="hint" id="h-mgr"></p>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="f-est">المدة المتوقعة للإنجاز</label>
+          <div class="join">
+            <input type="number" id="f-est" inputmode="decimal" min="0.25" step="0.25" placeholder="مثال: 3">
+            <select class="inp" id="f-unit" aria-label="وحدة المدة"><option value="h">ساعة</option><option value="d">يوم عمل</option></select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="f-due">موعد التسليم <span class="opt">اختياري</span></label>
+          <input type="date" id="f-due">
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="f-src">وصلت عن طريق</label>
+          <select class="inp" id="f-src">
+            <option value="whatsapp">واتساب</option>
+            <option value="verbal">شفهياً</option>
+            <option value="meeting">اجتماع</option>
+            <option value="email">إيميل</option>
+            <option value="other">طريقة أخرى</option>
+          </select>
+        </div>
+        <div class="check"><input type="checkbox" id="f-urgent"><label for="f-urgent">مهمة عاجلة</label></div>
+      </div>
+      <div class="field">
+        <label for="f-notes">ملاحظات <span class="opt">اختياري</span></label>
+        <textarea id="f-notes" rows="2" maxlength="600"></textarea>
+      </div>
+      <p class="err" id="f-err" role="alert" hidden></p>
+      <div class="actions">
+        <button class="btn primary" type="submit" id="f-save">حفظ المهمة</button>
+        <button class="btn" type="button" id="f-cancel">إلغاء</button>
+        <button class="btn danger" type="button" id="f-del" hidden>حذف المهمة</button>
+      </div>
+    </form>
+    <datalist id="dl-emp"></datalist>
+    <datalist id="dl-mgr"></datalist>
+  </dialog>
+
+  <dialog id="dlg-people" aria-labelledby="dp-h">
+    <h2 id="dp-h">الموظفون والمدراء</h2>
+    <form class="addp" id="form-person" novalidate>
+      <input type="text" id="p-name" maxlength="60" autocomplete="off" placeholder="الاسم" aria-label="الاسم">
+      <select class="inp" id="p-role" aria-label="الصفة"><option value="employee">موظف</option><option value="manager">مدير</option></select>
+      <button class="btn primary" type="submit" id="p-add">إضافة</button>
+    </form>
+    <p class="err" id="p-err" role="alert" hidden style="margin-block-start:.6rem"></p>
+    <h3>الموظفون</h3>
+    <ul class="plist" id="pl-employee"></ul>
+    <p class="pnone" id="pn-employee">لم يُضف أي موظف بعد.</p>
+    <h3>المدراء</h3>
+    <ul class="plist" id="pl-manager"></ul>
+    <p class="pnone" id="pn-manager">لم يُضف أي مدير بعد.</p>
+    <div class="actions" style="margin-block-start:1.1rem"><button class="btn" type="button" id="p-close">إغلاق</button></div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</div>
+
+<script src="config.js"></script>
+<script>
+(function () {
+  'use strict';
+  try { document.documentElement.dir = 'rtl'; document.documentElement.lang = 'ar'; } catch (e) {}
+
+  var HOURS_PER_DAY = 8;
+  var WEEKEND = [5, 6]; // Friday, Saturday
+  var SOURCES = { whatsapp: 'واتساب', verbal: 'شفهياً', meeting: 'اجتماع', email: 'إيميل', other: 'طريقة أخرى' };
+  var STATUS = { todo: 'لم تبدأ', doing: 'قيد التنفيذ', done: 'منجزة' };
+  var RANK = { doing: 0, todo: 1, done: 2 };
+
+  var CFG = window.TASKLOG_CONFIG || {};
+  var FB = CFG.firebase && CFG.firebase.projectId ? CFG.firebase : null;
+  var FB_SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
+  var mode = FB ? 'cloud' : 'local', code = '', unsubs = [], fbReady = null;
+  var db = null, canWrite = true;
+  var people = [], tasks = [], peopleLoaded = false, tasksLoaded = false;
+  var mgrFilter = 'all', showDone = false, editingId = null, saving = false, chipSig = '';
+  var pending = new Set();
+
+  function $(s) { return document.querySelector(s); }
+  function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+
+  function h(tag, props) {
+    var e = document.createElement(tag), k, v;
+    for (k in (props || {})) {
+      v = props[k];
+      if (v == null || v === false) continue;
+      if (k === 'class') e.className = v;
+      else if (k === 'style') e.style.cssText = v;
+      else if (k === 'dataset') Object.assign(e.dataset, v);
+      else if (k.slice(0, 2) === 'on') e.addEventListener(k.slice(2), v);
+      else if (k in e) e[k] = v;
+      else e.setAttribute(k, v === true ? '' : v);
+    }
+    for (var i = 2; i < arguments.length; i++) {
+      var c = arguments[i];
+      if (c == null || c === false) continue;
+      e.appendChild(c.nodeType ? c : document.createTextNode(String(c)));
+    }
+    return e;
+  }
+
+  /* ---------- text and numbers ---------- */
+  function clean(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function norm(s) {
+    return clean(s).replace(/[\u064B-\u0652\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').toLowerCase();
+  }
+  function fmtNum(n) { return String(Math.round(n * 100) / 100); }
+  function unitStr(n, one, two, few, half, quarter) {
+    if (n === 0.5) return half;
+    if (n === 0.25 && quarter) return quarter;
+    if (n === 1) return one;
+    if (n === 2) return two;
+    if (Number.isInteger(n) && n >= 3 && n <= 10) return n + ' ' + few;
+    return fmtNum(n) + ' ' + one;
+  }
+  function hourStr(n) { return unitStr(n, 'ساعة', 'ساعتين', 'ساعات', 'نصف ساعة', 'ربع ساعة'); }
+  function dayStr(n) { return unitStr(n, 'يوم', 'يومين', 'أيام', 'نصف يوم', null); }
+  function taskCountStr(n) {
+    if (n === 1) return 'مهمة واحدة';
+    if (n === 2) return 'مهمتان';
+    if (n >= 3 && n <= 10) return n + ' مهام';
+    return n + ' مهمة';
+  }
+  function fmtDur(hours) {
+    if (hours < HOURS_PER_DAY) return hourStr(Math.round(hours * 4) / 4);
+    return dayStr(Math.round(hours / HOURS_PER_DAY * 10) / 10);
+  }
+  function fmtEst(t) {
+    if (!t.estHours) return 'بدون تقدير';
+    return t.estUnit === 'd' ? dayStr(t.estValue) : hourStr(t.estValue);
+  }
+
+  /* ---------- dates ---------- */
+  function startOfToday() { var n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); }
+  function parseISO(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+    return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+  }
+  function dayDiff(a, b) { return Math.round((a - b) / 864e5); }
+  var dateFmt = null, dateFmtLong = null;
+  try {
+    dateFmt = new Intl.DateTimeFormat('ar-SA-u-ca-gregory-nu-latn', { weekday: 'long', day: 'numeric', month: 'long' });
+    dateFmtLong = new Intl.DateTimeFormat('ar-SA-u-ca-gregory-nu-latn', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  } catch (e) {}
+  function fmtDate(d) { return dateFmt ? dateFmt.format(d) : d.toLocaleDateString(); }
+  /* The working day on which `hours` of queued work ends, counting today if it is a working day. */
+  function freeDate(hours, from) {
+    var days = Math.ceil(hours / HOURS_PER_DAY);
+    if (!(days > 0)) return null;
+    var d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+    for (var guard = 0; guard < 4000; guard++) {
+      if (WEEKEND.indexOf(d.getDay()) === -1) { days--; if (days === 0) return d; }
+      d.setDate(d.getDate() + 1);
+    }
+    return null;
+  }
+  function isLate(t, today) { var d = parseISO(t.due); return !!d && t.status !== 'done' && d < today; }
+
+  /* ---------- reading shared data (treated as untrusted) ---------- */
+  function readTask(doc) {
+    var x = doc.data() || {}, eh = Number(x.estHours);
+    return {
+      id: doc.id,
+      title: clean(x.title) || 'مهمة بدون عنوان',
+      employeeId: String(x.employeeId || ''),
+      managerId: String(x.managerId || ''),
+      source: own(SOURCES, x.source) ? x.source : 'other',
+      estValue: Number(x.estValue) > 0 ? Number(x.estValue) : 0,
+      estUnit: x.estUnit === 'd' ? 'd' : 'h',
+      estHours: isFinite(eh) && eh > 0 ? eh : 0,
+      due: parseISO(x.due) ? x.due : null,
+      urgent: !!x.urgent,
+      notes: String(x.notes || '').trim(),
+      status: own(STATUS, x.status) ? x.status : 'todo',
+      createdAt: Number(x.createdAt) || 0,
+      doneAt: Number(x.doneAt) || 0
+    };
+  }
+  function readPerson(doc) {
+    var x = doc.data() || {};
+    return { id: doc.id, name: clean(x.name) || 'بدون اسم', role: x.role === 'manager' ? 'manager' : 'employee' };
+  }
+  function byName(a, b) { return a.name.localeCompare(b.name, 'ar'); }
+
+  /* ---------- main render ---------- */
+  function render() {
+    if (!(peopleLoaded && tasksLoaded)) return;
+    $('#loading').hidden = true; $('#gate').hidden = true; $('#unavail').hidden = true;
+    var empty = !people.length && !tasks.length;
+    $('#empty').hidden = !empty;
+    $('#work').hidden = empty;
+    $('#top-actions').hidden = empty;
+    if (empty) return;
+
+    var today = startOfToday();
+    var byId = new Map(people.map(function (p) { return [p.id, p]; }));
+    var emps = people.filter(function (p) { return p.role === 'employee'; });
+    var mgrs = people.filter(function (p) { return p.role === 'manager'; }).sort(byName);
+    if (mgrFilter !== 'all' && !(byId.has(mgrFilter) && byId.get(mgrFilter).role === 'manager')) mgrFilter = 'all';
+
+    var open = tasks.filter(function (t) { return t.status !== 'done'; });
+    var totalH = open.reduce(function (s, t) { return s + t.estHours; }, 0);
+    var lateN = open.filter(function (t) { return isLate(t, today); }).length;
+    var busy = new Set(open.map(function (t) { return t.employeeId; }));
+    var idleN = emps.filter(function (e) { return !busy.has(e.id); }).length;
+
+    var sum = $('#sum');
+    sum.replaceChildren(
+      h('div', null, h('dt', null, 'مهام مفتوحة'), h('dd', null, open.length)),
+      h('div', null, h('dt', null, 'حجم العمل المتبقي'), h('dd', null, totalH ? fmtDur(totalH) : '0')),
+      h('div', { class: lateN ? 'warn' : '' }, h('dt', null, 'متأخرة عن موعدها'), h('dd', null, lateN)),
+      h('div', null, h('dt', null, 'موظفون بلا مهام'), h('dd', null, idleN))
+    );
+
+    renderChips(mgrs);
+
+    var isEmp = function (id) { return byId.has(id) && byId.get(id).role === 'employee'; };
+    var groups = emps.map(function (e) { return { id: e.id, name: e.name, known: true }; });
+    if (tasks.some(function (t) { return !isEmp(t.employeeId); })) groups.push({ id: null, name: 'مهام بدون موظف حالي', known: false });
+
+    groups.forEach(function (g) {
+      g.all = tasks.filter(function (t) { return g.known ? t.employeeId === g.id : !isEmp(t.employeeId); });
+      g.open = g.all.filter(function (t) { return t.status !== 'done'; });
+      g.load = g.open.reduce(function (s, t) { return s + t.estHours; }, 0);
+      g.shown = g.all.filter(function (t) {
+        if (t.status === 'done' && !showDone) return false;
+        return mgrFilter === 'all' || t.managerId === mgrFilter;
+      }).sort(function (a, b) {
+        return (RANK[a.status] - RANK[b.status]) || ((b.urgent ? 1 : 0) - (a.urgent ? 1 : 0)) ||
+          ((a.due || '9999').localeCompare(b.due || '9999')) || (a.createdAt - b.createdAt);
+      });
+    });
+    groups = groups.filter(function (g) {
+      if (!g.known) return g.shown.length > 0;
+      return mgrFilter === 'all' || g.shown.length > 0;
+    }).sort(function (a, b) {
+      return ((a.known ? 0 : 1) - (b.known ? 0 : 1)) || (b.load - a.load) || byName(a, b);
+    });
+    var maxLoad = groups.reduce(function (m, g) { return Math.max(m, g.load); }, 0);
+
+    var board = $('#board');
+    var act = document.activeElement, focusKey = act && board.contains(act) ? act.dataset.focus : null;
+    var nodes = groups.map(function (g) { return empBlock(g, byId, today, maxLoad); });
+    if (!nodes.length) {
+      nodes = [h('p', { class: 'state' }, mgrFilter === 'all' ? 'لا يوجد موظفون بعد. أضف الموظفين من زر «الموظفون والمدراء».' : 'لا توجد مهام مفتوحة من هذا المدير.')];
+    }
+    board.replaceChildren.apply(board, nodes);
+    if (focusKey) {
+      var again = board.querySelector('[data-focus="' + focusKey.replace(/["\\]/g, '') + '"]');
+      if (again) try { again.focus({ preventScroll: true }); } catch (e) {}
+    }
+  }
+
+  function renderChips(mgrs) {
+    var sig = mgrFilter + '|' + mgrs.map(function (m) { return m.id + ':' + m.name; }).join(',');
+    if (sig === chipSig) return;
+    chipSig = sig;
+    var box = $('#chips');
+    var mk = function (id, label) {
+      return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(mgrFilter === id), onclick: function () { mgrFilter = id; render(); } }, label);
+    };
+    var kids = [h('span', { class: 'chips-label' }, 'مهام من:'), mk('all', 'كل المدراء')];
+    mgrs.forEach(function (m) { kids.push(mk(m.id, m.name)); });
+    box.replaceChildren.apply(box, kids);
+  }
+
+  function empBlock(g, byId, today, maxLoad) {
+    var stat;
+    if (!g.open.length) {
+      stat = h('p', { class: 'emp-stat' }, h('span', { class: 'free' }, 'متفرّغ الآن'), ' · لا مهام مفتوحة');
+    } else {
+      var fd = freeDate(g.load, today);
+      var when = fd ? (dayDiff(fd, today) === 0 ? 'نهاية اليوم' : fmtDate(fd)) : null;
+      stat = h('p', { class: 'emp-stat' },
+        h('b', null, taskCountStr(g.open.length)),
+        g.load ? ' · ' : null, g.load ? h('b', null, fmtDur(g.load)) : null, g.load ? ' عمل' : null,
+        g.known && when ? ' · يتفرّغ تقريباً ' + when : null);
+    }
+    var note = null;
+    if (mgrFilter !== 'all') {
+      var m = byId.get(mgrFilter), mine = g.open.filter(function (t) { return t.managerId === mgrFilter; }).length;
+      note = h('p', { class: 'emp-note' }, 'المعروض مهام ' + (m ? m.name : '') + ' فقط: ' + mine + ' من ' + g.open.length + ' مفتوحة');
+    }
+    var pct = maxLoad > 0 && g.load > 0 ? Math.max(2, Math.round(g.load / maxLoad * 100)) : 0;
+    var head = h('header', { class: 'emp-head' },
+      h('div', { class: 'emp-id' }, h('h2', null, g.name), stat, note),
+      g.known ? h('button', { class: 'btn sm w-only', type: 'button', dataset: { focus: 'add:' + g.id }, onclick: function () { openTask(null, g.name); } }, 'إضافة مهمة') : null,
+      h('div', { class: 'meter', role: 'img', 'aria-label': g.load ? 'حجم العمل: ' + fmtDur(g.load) : 'لا عمل متبقٍّ' }, h('span', { style: 'inline-size:' + pct + '%' }))
+    );
+    var body;
+    if (g.shown.length) {
+      body = h('ul', { class: 'tasks' });
+      g.shown.forEach(function (t) { body.appendChild(taskRow(t, byId, today)); });
+    } else {
+      body = null;
+    }
+    return h('section', { class: 'emp' }, head, body);
+  }
+
+  function dueCell(t, today) {
+    if (t.status === 'done') return h('span', { class: 't-due' }, t.doneAt ? 'أُنجزت ' + fmtDate(new Date(t.doneAt)) : 'منجزة');
+    var d = parseISO(t.due);
+    if (!d) return h('span', { class: 't-due' }, 'بدون موعد');
+    var diff = dayDiff(d, today);
+    if (diff < 0) return h('span', { class: 't-due' }, h('span', { class: 'tag late' }, 'متأخرة ' + dayStr(-diff)));
+    if (diff === 0) return h('span', { class: 't-due soon' }, 'التسليم اليوم');
+    if (diff === 1) return h('span', { class: 't-due soon' }, 'التسليم غداً');
+    return h('span', { class: 't-due' }, 'حتى ' + fmtDate(d));
+  }
+
+  function taskRow(t, byId, today) {
+    var mgr = byId.get(t.managerId), done = t.status === 'done';
+    var st;
+    if (canWrite) {
+      var sel = h('select', { 'aria-label': 'حالة المهمة: ' + t.title, dataset: { focus: 'st:' + t.id },
+        onchange: function () { setStatus(t, sel.value); } });
+      Object.keys(STATUS).forEach(function (k) { sel.appendChild(h('option', { value: k, selected: k === t.status }, STATUS[k])); });
+      st = h('span', { class: 'st sel', dataset: { status: t.status } }, sel);
+    } else {
+      st = h('span', { class: 'st pill', dataset: { status: t.status } }, STATUS[t.status]);
+    }
+    return h('li', { class: 'task' + (done ? ' is-done' : '') },
+      h('div', { class: 't-main' },
+        h('p', { class: 't-title' }, t.title, t.urgent && !done ? h('span', { class: 'tag late' }, 'عاجلة') : null),
+        h('p', { class: 't-meta' }, 'طلبها: ' + (mgr ? mgr.name : 'غير محدد') + ' · ' + SOURCES[t.source]),
+        t.notes ? h('p', { class: 't-notes' }, t.notes) : null),
+      h('span', { class: 't-dur' }, fmtEst(t)),
+      dueCell(t, today),
+      h('div', { class: 't-act' }, st,
+        h('button', { class: 'btn sm ghost w-only', type: 'button', dataset: { focus: 'ed:' + t.id }, onclick: function () { openTask(t); } }, 'تعديل'))
+    );
+  }
+
+  /* ---------- writes ---------- */
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  async function w(fn) {
+    try { return await fn(); }
+    catch (e) {
+      if (e && e.code === 'unavailable') { await wait(400 + Math.random() * 500); return await fn(); }
+      throw e;
+    }
+  }
+  function writeErrorText(e) {
+    var c = e && e.code;
+    if (c === 'permission-denied') return 'لم يُحفظ التغيير. رمز الدخول غير صالح، أعد تحميل الصفحة وأدخله من جديد.';
+    if (c === 'resource-exhausted') return 'وصل مخزن البيانات المجاني حدّه اليومي. أعد المحاولة غداً.';
+    if (c === 'not-found') return 'هذا السجل حُذف من جهاز آخر.';
+    return 'تعذّر الحفظ الآن. تحقق من الإنترنت ثم أعد المحاولة.';
+  }
+  var toastTimer = 0;
+  function toast(msg) {
+    var t = $('#toast'); t.textContent = msg; t.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.hidden = true; }, 3200);
+  }
+
+  async function setStatus(t, status) {
+    if (!db || pending.has(t.id) || status === t.status || !own(STATUS, status)) return;
+    pending.add(t.id);
+    try {
+      await w(function () { return db.doc('tasks/' + t.id).update({ status: status, doneAt: status === 'done' ? Date.now() : null }); });
+    } catch (e) { toast(writeErrorText(e)); }
+    pending.delete(t.id);
+    render();
+  }
+
+  function findPerson(name, role) {
+    var n = norm(name);
+    return people.find(function (p) { return p.role === role && norm(p.name) === n; }) || null;
+  }
+  async function ensurePerson(name, role) {
+    var p = findPerson(name, role);
+    if (p) return p.id;
+    var ref = db.collection('people').doc();
+    await w(function () { return ref.set({ name: name, role: role, createdAt: Date.now() }); });
+    people.push({ id: ref.id, name: name, role: role });
+    return ref.id;
+  }
+
+  /* ---------- task dialog ---------- */
+  var F = {};
+  ['title', 'emp', 'mgr', 'est', 'unit', 'due', 'src', 'urgent', 'notes', 'err', 'save', 'cancel', 'del'].forEach(function (k) { F[k] = $('#f-' + k); });
+  var dlgTask = $('#dlg-task'), dlgPeople = $('#dlg-people');
+  function openDlg(d) { if (d.showModal) { if (!d.open) d.showModal(); } else d.setAttribute('open', ''); }
+  function closeDlg(d) { if (d.close) { if (d.open) d.close(); } else d.removeAttribute('open'); }
+  function remembered(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+  function remember(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  function fillLists() {
+    [['employee', '#dl-emp'], ['manager', '#dl-mgr']].forEach(function (pair) {
+      var dl = $(pair[1]);
+      var opts = people.filter(function (p) { return p.role === pair[0]; }).sort(byName).map(function (p) { return h('option', { value: p.name }); });
+      dl.replaceChildren.apply(dl, opts);
+    });
+  }
+  function hintFor(input, role, hint) {
+    var v = clean(input.value);
+    hint.textContent = v && !findPerson(v, role) ? 'اسم جديد، يُضاف إلى القائمة عند الحفظ.' : '';
+  }
+  function disarm(btn, label) { btn.classList.remove('armed'); btn.textContent = label; clearTimeout(btn._t); }
+  /* Two-step delete: the first press arms the button, the second within four seconds runs it. */
+  function twoStep(btn, label, run) {
+    if (btn.classList.contains('armed')) { disarm(btn, label); run(); return; }
+    btn.classList.add('armed'); btn.textContent = 'اضغط مرة أخرى للتأكيد';
+    btn._t = setTimeout(function () { disarm(btn, label); }, 4000);
+  }
+
+  function openTask(t, empName) {
+    if (!db || !canWrite) return;
+    editingId = t ? t.id : null;
+    var byId = new Map(people.map(function (p) { return [p.id, p]; }));
+    $('#dt-h').textContent = t ? 'تعديل المهمة' : 'مهمة جديدة';
+    F.title.value = t ? t.title : '';
+    F.emp.value = t ? ((byId.get(t.employeeId) || {}).name || '') : (empName || '');
+    var defMgr = mgrFilter !== 'all' && byId.get(mgrFilter) ? byId.get(mgrFilter).name : remembered('tasklog.manager');
+    F.mgr.value = t ? ((byId.get(t.managerId) || {}).name || '') : defMgr;
+    F.est.value = t && t.estValue ? t.estValue : '';
+    F.unit.value = t ? t.estUnit : 'h';
+    F.due.value = t && t.due ? t.due : '';
+    F.src.value = t ? t.source : 'whatsapp';
+    F.urgent.checked = t ? t.urgent : false;
+    F.notes.value = t ? t.notes : '';
+    F.err.hidden = true;
+    F.del.hidden = !t; disarm(F.del, 'حذف المهمة');
+    hintFor(F.emp, 'employee', $('#h-emp')); hintFor(F.mgr, 'manager', $('#h-mgr'));
+    openDlg(dlgTask);
+    F.title.focus();
+  }
+
+  async function saveTask(ev) {
+    ev.preventDefault();
+    if (saving || !db) return;
+    var title = clean(F.title.value), empName = clean(F.emp.value), mgrName = clean(F.mgr.value);
+    var est = parseFloat(F.est.value), unit = F.unit.value === 'd' ? 'd' : 'h';
+    var problem = '';
+    if (!title) problem = 'اكتب وصف المهمة.';
+    else if (!empName) problem = 'اختر الموظف أو اكتب اسمه.';
+    else if (!mgrName) problem = 'اختر المدير الذي طلب المهمة أو اكتب اسمه.';
+    else if (!(est > 0)) problem = 'اكتب المدة المتوقعة برقم أكبر من صفر.';
+    else if (est * (unit === 'd' ? HOURS_PER_DAY : 1) > 4000) problem = 'المدة أطول من المعقول. راجع الرقم أو الوحدة.';
+    if (problem) { F.err.textContent = problem; F.err.hidden = false; return; }
+    saving = true; F.save.disabled = true; F.err.hidden = true;
+    try {
+      var employeeId = await ensurePerson(empName, 'employee');
+      var managerId = await ensurePerson(mgrName, 'manager');
+      var body = {
+        title: title.slice(0, 200), employeeId: employeeId, managerId: managerId,
+        source: own(SOURCES, F.src.value) ? F.src.value : 'other',
+        estValue: est, estUnit: unit, estHours: est * (unit === 'd' ? HOURS_PER_DAY : 1),
+        due: parseISO(F.due.value) ? F.due.value : null,
+        urgent: F.urgent.checked, notes: F.notes.value.trim().slice(0, 600)
+      };
+      if (editingId) {
+        var id = editingId;
+        await w(function () { return db.doc('tasks/' + id).update(body); });
+      } else {
+        body.status = 'todo'; body.createdAt = Date.now(); body.doneAt = null;
+        var ref = db.collection('tasks').doc();
+        await w(function () { return ref.set(body); });
+      }
+      remember('tasklog.manager', mgrName);
+      closeDlg(dlgTask);
+      toast('حُفظت المهمة');
+    } catch (e) {
+      F.err.textContent = writeErrorText(e); F.err.hidden = false;
+    }
+    saving = false; F.save.disabled = false;
+  }
+
+  async function deleteTask() {
+    if (!editingId || !db) return;
+    var id = editingId;
+    try {
+      await w(function () { return db.doc('tasks/' + id).delete(); });
+      closeDlg(dlgTask); toast('حُذفت المهمة');
+    } catch (e) { F.err.textContent = writeErrorText(e); F.err.hidden = false; }
+  }
+
+  /* ---------- people dialog ---------- */
+  var rows = new Map();
+  function showPErr(msg) { var e = $('#p-err'); e.textContent = msg || ''; e.hidden = !msg; }
+  function renderPeople() {
+    if (!peopleLoaded) return;
+    var counts = new Map();
+    tasks.forEach(function (t) {
+      if (t.status === 'done') return;
+      [t.employeeId, t.managerId].forEach(function (id) { counts.set(id, (counts.get(id) || 0) + 1); });
+    });
+    var seen = new Set();
+    ['employee', 'manager'].forEach(function (role) {
+      var list = $('#pl-' + role);
+      var ps = people.filter(function (p) { return p.role === role; }).sort(byName);
+      $('#pn-' + role).hidden = ps.length > 0;
+      ps.forEach(function (p, i) {
+        seen.add(p.id);
+        var r = rows.get(p.id);
+        if (!r) { r = personRow(p); rows.set(p.id, r); }
+        r.person = p;
+        if (document.activeElement !== r.input) r.input.value = p.name;
+        var n = counts.get(p.id) || 0;
+        r.cnt.textContent = n ? taskCountStr(n) : 'بلا مهام مفتوحة';
+        r.del.disabled = n > 0;
+        r.del.title = n > 0 ? 'لا يُحذف من عليه مهام مفتوحة' : '';
+        if (list.children[i] !== r.li) list.insertBefore(r.li, list.children[i] || null);
+      });
+    });
+    rows.forEach(function (r, id) { if (!seen.has(id)) { r.li.remove(); rows.delete(id); } });
+  }
+  function personRow(p) {
+    var r = { person: p };
+    r.input = h('input', { type: 'text', id: 'pn-' + p.id, maxLength: 60, 'aria-label': 'الاسم', value: p.name,
+      onchange: function () { renamePerson(r); } });
+    r.cnt = h('span', { class: 'cnt' });
+    r.del = h('button', { class: 'btn sm danger', type: 'button', onclick: function () { twoStep(r.del, 'حذف', function () { removePerson(r); }); } }, 'حذف');
+    r.li = h('li', null, r.input, r.cnt, r.del);
+    return r;
+  }
+  async function renamePerson(r) {
+    var name = clean(r.input.value), p = r.person;
+    if (!name) { r.input.value = p.name; return; }
+    if (name === p.name) return;
+    var clash = findPerson(name, p.role);
+    if (clash && clash.id !== p.id) { showPErr('هذا الاسم مسجّل من قبل.'); r.input.value = p.name; return; }
+    showPErr('');
+    try { await w(function () { return db.doc('people/' + p.id).update({ name: name }); }); toast('حُفظ الاسم'); }
+    catch (e) { showPErr(writeErrorText(e)); r.input.value = p.name; }
+  }
+  async function removePerson(r) {
+    var p = r.person;
+    showPErr('');
+    try { await w(function () { return db.doc('people/' + p.id).delete(); }); toast('حُذف الاسم'); }
+    catch (e) { showPErr(writeErrorText(e)); }
+  }
+  async function addPerson(ev) {
+    ev.preventDefault();
+    if (!db) return;
+    var name = clean($('#p-name').value), role = $('#p-role').value === 'manager' ? 'manager' : 'employee';
+    if (!name) { showPErr('اكتب الاسم أولاً.'); return; }
+    if (findPerson(name, role)) { showPErr('هذا الاسم مسجّل من قبل.'); return; }
+    showPErr(''); $('#p-add').disabled = true;
+    try {
+      var ref = db.collection('people').doc();
+      await w(function () { return ref.set({ name: name, role: role, createdAt: Date.now() }); });
+      $('#p-name').value = ''; $('#p-name').focus();
+    } catch (e) { showPErr(writeErrorText(e)); }
+    $('#p-add').disabled = false;
+  }
+  function openPeople() { if (!db || !canWrite) return; showPErr(''); renderPeople(); openDlg(dlgPeople); $('#p-name').focus(); }
+
+  /* ---------- wiring ---------- */
+  $('#today').textContent = dateFmtLong ? dateFmtLong.format(new Date()) : '';
+  $('#btn-new').addEventListener('click', function () { openTask(null); });
+  $('#btn-new-2').addEventListener('click', function () { openTask(null); });
+  $('#btn-people').addEventListener('click', openPeople);
+  $('#btn-people-2').addEventListener('click', openPeople);
+  $('#form-task').addEventListener('submit', saveTask);
+  F.cancel.addEventListener('click', function () { closeDlg(dlgTask); });
+  F.del.addEventListener('click', function () { twoStep(F.del, 'حذف المهمة', deleteTask); });
+  F.emp.addEventListener('input', function () { hintFor(F.emp, 'employee', $('#h-emp')); });
+  F.mgr.addEventListener('input', function () { hintFor(F.mgr, 'manager', $('#h-mgr')); });
+  $('#form-person').addEventListener('submit', addPerson);
+  $('#p-close').addEventListener('click', function () { closeDlg(dlgPeople); });
+  $('#show-done').addEventListener('change', function (e) { showDone = e.target.checked; render(); });
+
+  function unavailable(msg) {
+    $('#loading').hidden = true; $('#empty').hidden = true; $('#work').hidden = true; $('#top-actions').hidden = true; $('#gate').hidden = true;
+    if (msg) $('#unavail-text').textContent = msg;
+    $('#unavail').hidden = false;
+  }
+
+  /* ---------- storage: this device only, used until a shared store is configured ---------- */
+  function localDb() {
+    var KEY = 'tasklog.local.v1', subs = {}, store;
+    try { store = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { store = {}; }
+    function col(n) { return store[n] || (store[n] = {}); }
+    function emit(n) {
+      var c = col(n);
+      var docs = Object.keys(c).map(function (id) { var d = c[id]; return { id: id, data: function () { return d; } }; });
+      (subs[n] || []).forEach(function (cb) { cb({ docs: docs }); });
+    }
+    function save(n) { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) {} emit(n); }
+    function docRef(n, id) {
+      return {
+        id: id,
+        set: async function (body) { col(n)[id] = Object.assign({}, body); save(n); },
+        update: async function (body) {
+          if (!col(n)[id]) { var e = new Error('missing'); e.code = 'not-found'; throw e; }
+          col(n)[id] = Object.assign({}, col(n)[id], body); save(n);
+        },
+        delete: async function () { delete col(n)[id]; save(n); }
+      };
+    }
+    function colRef(n) {
+      return {
+        limit: function () { return this; },
+        onSnapshot: function (cb) { (subs[n] = subs[n] || []).push(cb); setTimeout(function () { emit(n); }, 0); return function () { subs[n] = []; }; },
+        doc: function (id) { return docRef(n, id || ('l' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8))); }
+      };
+    }
+    return { collection: colRef, doc: function (p) { var a = p.split('/'); return docRef(a[0], a[1]); } };
+  }
+
+  /* ---------- storage: shared, Firebase Firestore under boards/<access code>/ ---------- */
+  function loadScript(src) {
+    return new Promise(function (res, rej) {
+      var el = document.createElement('script'); el.src = src; el.onload = res;
+      el.onerror = function () { rej(new Error('script')); };
+      document.head.appendChild(el);
+    });
+  }
+  function firebaseReady() {
+    if (!fbReady) {
+      fbReady = loadScript(FB_SDK + 'firebase-app-compat.js')
+        .then(function () { return loadScript(FB_SDK + 'firebase-firestore-compat.js'); })
+        .then(function () { window.firebase.initializeApp(FB); return window.firebase.firestore(); });
+    }
+    return fbReady;
+  }
+  function cloudDb(fs, c) {
+    var root = fs.collection('boards').doc(c);
+    return {
+      collection: function (n) { return root.collection(n); },
+      doc: function (p) { var a = p.split('/'); return root.collection(a[0]).doc(a[1]); }
+    };
+  }
+  function validCode(c) { return /^[A-Za-z0-9_-]{4,64}$/.test(c || ''); }
+  function forget(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
+  function stopSubs() { unsubs.forEach(function (u) { try { u(); } catch (e) {} }); unsubs = []; }
+  function confirmed(s) {
+    if (mode !== 'cloud' || (s.metadata && s.metadata.fromCache)) return;
+    remember('tasklog.code', code);
+    $('#btn-share').hidden = false;
+  }
+  function subscribe() {
+    unsubs.push(db.collection('people').limit(1000).onSnapshot(function (s) {
+      people = s.docs.map(readPerson); peopleLoaded = true; confirmed(s);
+      fillLists(); render(); renderPeople();
+    }, onSubError));
+    unsubs.push(db.collection('tasks').limit(1000).onSnapshot(function (s) {
+      tasks = s.docs.map(readTask); tasksLoaded = true; confirmed(s);
+      render(); renderPeople();
+    }, onSubError));
+  }
+  function onSubError(e) {
+    stopSubs(); db = null;
+    if (mode === 'cloud' && e && e.code === 'permission-denied') {
+      forget('tasklog.code');
+      showGate('الرمز غير صحيح. تأكد منه وأعد المحاولة.');
+      return;
+    }
+    unavailable('انقطع الاتصال بالسجل. تحقق من الإنترنت ثم أعد تحميل الصفحة.');
+  }
+
+  function showGate(msg) {
+    closeDlg(dlgTask); closeDlg(dlgPeople);
+    $('#loading').hidden = true; $('#empty').hidden = true; $('#work').hidden = true;
+    $('#top-actions').hidden = true; $('#unavail').hidden = true;
+    var err = $('#g-err'); err.textContent = msg || ''; err.hidden = !msg;
+    $('#g-go').disabled = false;
+    $('#gate').hidden = false;
+  }
+  async function connect(c) {
+    stopSubs(); people = []; tasks = []; peopleLoaded = false; tasksLoaded = false; chipSig = '';
+    $('#gate').hidden = true; $('#unavail').hidden = true; $('#loading').hidden = false;
+    var fs;
+    try { fs = await firebaseReady(); }
+    catch (e) { fbReady = null; unavailable('تعذّر الاتصال بمخزن البيانات. تحقق من الإنترنت ثم أعد تحميل الصفحة.'); return; }
+    code = c; db = cloudDb(fs, c);
+    subscribe();
+  }
+  $('#form-gate').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var c = clean($('#g-code').value);
+    if (!validCode(c)) { showGate('الرمز غير صحيح. تأكد منه وأعد المحاولة.'); return; }
+    $('#g-go').disabled = true;
+    connect(c);
+  });
+  $('#btn-share').addEventListener('click', function () {
+    var url = location.origin + location.pathname + '#' + code;
+    var done = function () { toast('نُسخ الرابط. كل من يصله يفتح السجل مباشرة.'); };
+    var manual = function () { window.prompt('انسخ رابط المشاركة:', url); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, manual);
+    else manual();
+  });
+
+  function start() {
+    if (mode === 'local') { $('#demo-note').hidden = false; db = localDb(); subscribe(); return; }
+    var fromLink = '';
+    try { fromLink = decodeURIComponent((location.hash || '').slice(1)); } catch (e) {}
+    var saved = remembered('tasklog.code');
+    var c = validCode(fromLink) ? fromLink : (validCode(saved) ? saved : '');
+    if (c) connect(c); else showGate('');
+  }
+  start();
+})();
+</script>
+</body>
+</html>

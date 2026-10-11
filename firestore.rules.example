@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // استبدل PUT-ACCESS-CODE-HERE برمز الدخول الذي تختاره (حروف إنجليزية وأرقام، 4 خانات أو أكثر).
+    // لا ترفع الرمز الحقيقي إلى هذا المستودع لأنه عام.
+    match /boards/PUT-ACCESS-CODE-HERE/{collection}/{document} {
+      allow read, write: if true;
+    }
+  }
+}
