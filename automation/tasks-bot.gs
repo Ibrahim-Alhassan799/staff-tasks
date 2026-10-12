@@ -86,7 +86,7 @@ function tgReply_(m, text) {
   catch (e) { Logger.log(e.message); }
 }
 
-/** يعمل كل دقيقة. */
+/** يعمل كل دقيقة: يقرأ رسائل البوت وضغطات الأزرار، ثم يرسل للموظفين مهامهم الجديدة. */
 function checkTelegram() {
   if (!hasTelegram_()) return;
   var lock = LockService.getScriptLock();
@@ -94,44 +94,197 @@ function checkTelegram() {
   try {
     var props = PropertiesService.getScriptProperties();
     var offset = Number(props.getProperty('tg_offset') || 0);
-    var updates = tg_('getUpdates', { offset: offset, timeout: 0, allowed_updates: ['message'] }).result || [];
+    var updates = tg_('getUpdates', { offset: offset, timeout: 0, allowed_updates: ['message', 'callback_query'] }).result || [];
     updates.forEach(function (u) {
       // تقديم المؤشر قبل المعالجة حتى لا تتكرر رسالة سببت خطأ.
       props.setProperty('tg_offset', String(u.update_id + 1));
+      if (u.callback_query) {
+        try { handleButton_(u.callback_query, props); }
+        catch (e) { tgAnswer_(u.callback_query, 'تعذّر التحديث الآن. حاول بعد دقيقة.'); Logger.log(e.message); }
+        return;
+      }
       var m = u.message;
       if (!m || !m.text || !m.from || m.chat.type !== 'private') return;
       try { handleTelegram_(m, props); }
-      catch (e) { tgReply_(m, 'تعذّر تسجيل المهمة الآن. أعد إرسالها بعد دقائق.\n(' + e.message.slice(0, 150) + ')'); }
+      catch (e) { tgReply_(m, 'تعذّر تنفيذ طلبك الآن. أعد المحاولة بعد دقائق.\n(' + e.message.slice(0, 150) + ')'); }
     });
+    try { notifyNewTasks_(props); } catch (e) { Logger.log('notify: ' + e.message); }
   } finally {
     lock.releaseLock();
   }
 }
 
+var EMP_HELP = 'ستصلك هنا كل مهمة جديدة تُسجَّل لك، ومعها زرّان: «بدأت» و«أنجزتها» لتحديث حالتها في السجل.\n' +
+  'لعرض مهامك المفتوحة أرسل: مهامي';
+
 function handleTelegram_(m, props) {
   var text = String(m.text).trim();
-  var key = 'tg_user_' + m.from.id;
+  var uid = String(m.from.id);
+  var key = 'tg_user_' + uid;
+
+  // ربط موظف: من رابط التسجيل الخاص بالموظفين أو برسالة «موظف <الرمز> <الاسم>».
+  var emp = text.match(/^(?:\/start\s+emp-(\S+)|موظف\s+(\S+))(?:\s+([\s\S]+))?$/);
+  if (emp) {
+    var code = emp[1] || emp[2];
+    if (code !== CONFIG.ACCESS_CODE) { tgReply_(m, 'رمز الدخول غير صحيح.'); return; }
+    if (clean_(emp[3])) { linkEmployee_(m, emp[3], props); return; }
+    props.setProperty('tg_pending_' + uid, 'emp');
+    tgReply_(m, 'أهلاً. اكتب اسمك كما هو مسجّل في سجل المهام، مثال: أحمد صلاح');
+    return;
+  }
+  if (props.getProperty('tg_pending_' + uid) === 'emp' && text.charAt(0) !== '/') {
+    linkEmployee_(m, text, props);
+    return;
+  }
 
   var reg = text.match(/^(?:\/start|تسجيل)(?:\s+(\S+))?(?:\s+([\s\S]+))?$/);
   if (reg) {
     if (!reg[1]) {
       if (props.getProperty(key)) { tgReply_(m, HELP_TEXT); return; }
-      tgReply_(m, 'للتسجيل أرسل: تسجيل ثم رمز الدخول ثم اسمك كما تريده في السجل.\nمثال: تسجيل xxxx خالد');
+      if (props.getProperty('tg_emp_of_' + uid)) { tgReply_(m, EMP_HELP); return; }
+      tgReply_(m, 'للتسجيل كمدير أرسل: تسجيل ثم رمز الدخول ثم اسمك.\nوللتسجيل كموظف أرسل: موظف ثم رمز الدخول ثم اسمك.');
       return;
     }
     if (reg[1] !== CONFIG.ACCESS_CODE) { tgReply_(m, 'رمز الدخول غير صحيح.'); return; }
     var name = clean_(reg[2]) || clean_([m.from.first_name, m.from.last_name].join(' ')) || 'مدير';
     props.setProperty(key, name.slice(0, 60));
-    tgReply_(m, 'تم تسجيلك باسم «' + name + '». المهام التي ترسلها هنا تُسجَّل باسمك.\n\n' + HELP_TEXT +
-      '\n\nلتغيير الاسم أرسل: تسجيل ' + CONFIG.ACCESS_CODE + ' الاسم الجديد');
+    rememberManagerChat_(name, m.chat.id, props);
+    tgReply_(m, 'تم تسجيلك باسم «' + name + '». المهام التي ترسلها هنا تُسجَّل باسمك، ويصلك إشعار هنا عندما يُنهيها الموظف.\n\n' +
+      HELP_TEXT + '\n\nلتغيير الاسم أرسل: تسجيل ' + CONFIG.ACCESS_CODE + ' الاسم الجديد');
+    return;
+  }
+
+  var empId = props.getProperty('tg_emp_of_' + uid);
+  if (/^(مهامي|مهامى|\/tasks)$/.test(text)) {
+    if (!empId) { tgReply_(m, 'حسابك غير مربوط بموظف. أرسل: موظف ثم رمز الدخول ثم اسمك.'); return; }
+    sendMyTasks_(m, empId);
     return;
   }
 
   var manager = props.getProperty(key);
-  if (!manager) { tgReply_(m, 'لم تُسجَّل بعد. أرسل: تسجيل ثم رمز الدخول ثم اسمك.'); return; }
+  if (!manager) {
+    tgReply_(m, empId ? EMP_HELP : 'لم تُسجَّل بعد. أرسل: تسجيل ثم رمز الدخول ثم اسمك.');
+    return;
+  }
   if (/^(\/help|مساعدة|مساعده|\?|؟)$/.test(text)) { tgReply_(m, HELP_TEXT); return; }
 
-  tgReply_(m, recordTask_(text, '', manager, 'telegram', true));
+  tgReply_(m, recordTask_(text, '', manager, 'telegram', true, m.chat.id));
+}
+
+function linkEmployee_(m, name, props) {
+  var uid = String(m.from.id);
+  var people = listPeople_();
+  var emp = matchEmployee_(clean_(name), people);
+  if (emp.error) { tgReply_(m, emp.error + '\nاكتب اسمك مرة أخرى.'); return; }
+  var old = props.getProperty('tg_emp_of_' + uid);
+  if (old && old !== emp.id) props.deleteProperty('tg_chat_emp_' + old);
+  props.setProperty('tg_emp_of_' + uid, emp.id);
+  props.setProperty('tg_chat_emp_' + emp.id, String(m.chat.id));
+  props.deleteProperty('tg_pending_' + uid);
+  tgReply_(m, 'تم ربط حسابك بالموظف «' + emp.name + '».\n' + EMP_HELP);
+}
+
+function rememberManagerChat_(name, chatId, props) {
+  try {
+    var id = ensurePerson_(name, 'manager', listPeople_());
+    props.setProperty('tg_chat_mgr_' + id, String(chatId));
+  } catch (e) { Logger.log(e.message); }
+}
+
+function tgAnswer_(cq, text) {
+  try { tg_('answerCallbackQuery', { callback_query_id: cq.id, text: text }); } catch (e) { Logger.log(e.message); }
+}
+
+function taskButtons_(id, status) {
+  if (status === 'done') return { inline_keyboard: [] };
+  var row = [];
+  if (status !== 'doing') row.push({ text: 'بدأت', callback_data: 's|' + id + '|doing' });
+  row.push({ text: 'أنجزتها', callback_data: 's|' + id + '|done' });
+  return { inline_keyboard: [row] };
+}
+
+function taskCard_(t, managerName, heading) {
+  var lines = [heading, t.title];
+  if (managerName) lines.push('من: ' + managerName);
+  if (t.estHours) lines.push('المدة: ' + durText_({ value: t.estValue || t.estHours, unit: t.estUnit === 'd' ? 'd' : 'h' }));
+  if (t.due) lines.push('التسليم: ' + t.due);
+  if (t.urgent) lines.push('عاجلة');
+  if (t.notes) lines.push('ملاحظات: ' + t.notes);
+  return lines.join('\n');
+}
+
+/** يرسل لكل موظف مربوط بالبوت المهام التي سُجّلت له منذ آخر فحص، أياً كان مصدرها. */
+function notifyNewTasks_(props) {
+  var last = Number(props.getProperty('tg_last_task_ts') || 0);
+  var now = Date.now();
+  if (!last) { props.setProperty('tg_last_task_ts', String(now)); return; }
+  var sent = JSON.parse(props.getProperty('tg_notified') || '[]'), seen = {};
+  sent.forEach(function (id) { seen[id] = true; });
+  // نافذة عشر دقائق للخلف تحمي من فروق الساعة بين الأجهزة؛ قائمة المُرسَل تمنع التكرار.
+  var tasks = queryTasks_({ field: 'createdAt', op: 'GREATER_THAN', value: { integerValue: String(last - 600000) } });
+  var people = null, maxTs = last;
+  tasks.sort(function (a, b) { return a.createdAt - b.createdAt; }).forEach(function (t) {
+    maxTs = Math.max(maxTs, t.createdAt || 0);
+    if (seen[t.id] || t.status === 'done') return;
+    seen[t.id] = true; sent.push(t.id);
+    var chat = props.getProperty('tg_chat_emp_' + t.employeeId);
+    if (!chat) return;
+    people = people || listPeople_();
+    var mgr = people.filter(function (p) { return p.id === t.managerId; })[0];
+    try {
+      tg_('sendMessage', { chat_id: Number(chat), text: taskCard_(t, mgr && mgr.name, 'مهمة جديدة لك:'), reply_markup: taskButtons_(t.id, t.status) });
+    } catch (e) { Logger.log(e.message); }
+  });
+  props.setProperty('tg_last_task_ts', String(Math.min(maxTs, now)));
+  props.setProperty('tg_notified', JSON.stringify(sent.slice(-300)));
+}
+
+function handleButton_(cq, props) {
+  var parts = String(cq.data || '').split('|');
+  if (parts[0] !== 's' || !parts[1] || (parts[2] !== 'doing' && parts[2] !== 'done')) { tgAnswer_(cq, ''); return; }
+  var empId = props.getProperty('tg_emp_of_' + cq.from.id);
+  var t = getTask_(parts[1]);
+  if (!t) { tgAnswer_(cq, 'هذه المهمة حُذفت من السجل.'); return; }
+  if (!empId || t.employeeId !== empId) { tgAnswer_(cq, 'هذه المهمة ليست مسجّلة باسمك.'); return; }
+  var status = parts[2];
+  if (t.status !== status) {
+    updateTask_(t.id, { status: status, doneAt: status === 'done' ? Date.now() : null });
+  }
+  tgAnswer_(cq, status === 'done' ? 'سُجّلت المهمة منجزة' : 'سُجّلت المهمة قيد التنفيذ');
+  if (cq.message) {
+    var label = status === 'done' ? '\n\nالحالة: منجزة' : '\n\nالحالة: قيد التنفيذ';
+    try {
+      tg_('editMessageText', {
+        chat_id: cq.message.chat.id, message_id: cq.message.message_id,
+        text: String(cq.message.text || t.title).replace(/\n\nالحالة: .*$/, '') + label,
+        reply_markup: taskButtons_(t.id, status)
+      });
+    } catch (e) { Logger.log(e.message); }
+  }
+  if (status === 'done' && t.status !== 'done') {
+    var chat = props.getProperty('tg_chat_mgr_' + t.managerId);
+    if (chat) {
+      var people = listPeople_();
+      var emp = people.filter(function (p) { return p.id === t.employeeId; })[0];
+      try { tg_('sendMessage', { chat_id: Number(chat), text: 'أنجز ' + (emp ? emp.name : 'الموظف') + ' المهمة:\n' + t.title }); }
+      catch (e) { Logger.log(e.message); }
+    }
+  }
+}
+
+function sendMyTasks_(m, empId) {
+  var open = queryTasks_({ field: 'employeeId', op: 'EQUAL', value: { stringValue: empId } })
+    .filter(function (t) { return t.status !== 'done'; })
+    .sort(function (a, b) { return (a.due || '9999').localeCompare(b.due || '9999'); });
+  if (!open.length) { tgReply_(m, 'ما عندك مهام مفتوحة.'); return; }
+  var people = listPeople_();
+  tgReply_(m, 'عندك ' + open.length + ' ' + (open.length === 1 ? 'مهمة مفتوحة' : 'مهام مفتوحة') + ':');
+  open.slice(0, 15).forEach(function (t) {
+    var mgr = people.filter(function (p) { return p.id === t.managerId; })[0];
+    var head = t.status === 'doing' ? 'قيد التنفيذ:' : 'لم تبدأ:';
+    try { tg_('sendMessage', { chat_id: m.chat.id, text: taskCard_(t, mgr && mgr.name, head), reply_markup: taskButtons_(t.id, t.status) }); }
+    catch (e) { Logger.log(e.message); }
+  });
 }
 
 /* ===================== الإيميل ===================== */
@@ -196,7 +349,7 @@ function stripQuoted_(body) {
 
 /* ===================== التسجيل ===================== */
 
-function recordTask_(text, fallbackTitle, managerName, source, keepExtraLines) {
+function recordTask_(text, fallbackTitle, managerName, source, keepExtraLines, chatId) {
   var t = parseTask_(text, fallbackTitle, todayISO_(), keepExtraLines);
   if (t.errors.length) return 'ما سُجّلت المهمة: ' + t.errors.join('، ') + '.\n\n' + HELP_TEXT;
 
@@ -204,6 +357,7 @@ function recordTask_(text, fallbackTitle, managerName, source, keepExtraLines) {
   var emp = matchEmployee_(t.employee, people);
   if (emp.error) return emp.error;
   var managerId = ensurePerson_(managerName, 'manager', people);
+  if (chatId) PropertiesService.getScriptProperties().setProperty('tg_chat_mgr_' + managerId, String(chatId));
 
   var estHours = t.est.unit === 'd' ? t.est.value * CONFIG.HOURS_PER_DAY : t.est.value;
   createDoc_('tasks', {
@@ -413,4 +567,44 @@ function createDoc_(collection, data) {
   Object.keys(data).forEach(function (k) { fields[k] = toValue_(data[k]); });
   var doc = fs_('post', '/' + collection, { fields: fields });
   return doc.name.split('/').pop();
+}
+
+function fromValue_(v) {
+  if (!v) return null;
+  if ('stringValue' in v) return v.stringValue;
+  if ('integerValue' in v) return Number(v.integerValue);
+  if ('doubleValue' in v) return Number(v.doubleValue);
+  if ('booleanValue' in v) return v.booleanValue;
+  return null;
+}
+function docToTask_(d) {
+  var f = d.fields || {}, t = { id: d.name.split('/').pop() };
+  Object.keys(f).forEach(function (k) { t[k] = fromValue_(f[k]); });
+  t.title = clean_(t.title) || 'مهمة بدون عنوان';
+  t.status = t.status === 'doing' || t.status === 'done' ? t.status : 'todo';
+  t.createdAt = Number(t.createdAt) || 0;
+  t.estHours = Number(t.estHours) || 0;
+  t.estValue = Number(t.estValue) || 0;
+  return t;
+}
+function getTask_(id) {
+  var res = UrlFetchApp.fetch(fsUrl_('/tasks/' + encodeURIComponent(id)), { muteHttpExceptions: true });
+  if (res.getResponseCode() === 404) return null;
+  if (res.getResponseCode() >= 300) throw new Error('Firestore ' + res.getResponseCode());
+  return docToTask_(JSON.parse(res.getContentText()));
+}
+function updateTask_(id, data) {
+  var fields = {}, mask = [];
+  Object.keys(data).forEach(function (k) { fields[k] = toValue_(data[k]); mask.push('updateMask.fieldPaths=' + k); });
+  fs_('patch', '/tasks/' + encodeURIComponent(id) + '?' + mask.join('&') + '&currentDocument.exists=true', { fields: fields });
+}
+function queryTasks_(filter) {
+  var rows = fs_('post', ':runQuery', {
+    structuredQuery: {
+      from: [{ collectionId: 'tasks' }],
+      where: { fieldFilter: { field: { fieldPath: filter.field }, op: filter.op, value: filter.value } },
+      limit: 200
+    }
+  });
+  return (rows || []).filter(function (r) { return r.document; }).map(function (r) { return docToTask_(r.document); });
 }
